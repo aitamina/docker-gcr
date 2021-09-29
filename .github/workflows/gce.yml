@@ -1,0 +1,87 @@
+# Copyright 2020 Google, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Build and Deploy to Google Compute Engine
+
+on:
+  push:
+    branches:
+      - b1
+
+env:
+  PROJECT_ID: ${{ secrets.PROJECT_ID }}
+  SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+  GCE_INSTANCE: docker-gcr
+  GCE_INSTANCE_ZONE: us-central1-a
+
+  IMAGE_NAME: gcr.io/${{ secrets.PROJECT_ID }}/${{ secrets.SERVICE_NAME }}
+
+jobs:
+  setup-build-publish-deploy:
+    name: Setup, Build, Publish, and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      #       - name: Extract tag
+      #         run: echo "::set-env name=TAG::$(echo ${GITHUB_REF##*/})"
+
+      #       # This step stops the pipeline if current Tag doesn't contain 'staging' or 'production'
+      #       - name: Invalid tag
+      #         if: (! contains(env.TAG, 'staging')) && (! contains(env.TAG, 'production'))
+      #         run: |
+      #           echo "Specify 'staging' or production in your tag."
+      #           exit 1
+      #       # If Tag contains 'staging', set staging environment
+      #       - name: Set STAGING env
+      #         if: contains(env.TAG, 'staging')
+      #         run: |
+      #           echo "::set-env name=PROJECT_ID::google-staging-project"
+      #           echo "::set-env name=SECRET_KEY_NAME::GITHUB_STAGING_SECRET"
+      #       # If Tag contains 'production', set production environment
+      #       - name: Set PRODUCTION env
+      #         if: contains(env.TAG, 'production')
+      #         run: |
+      #           echo "::set-env name=PROJECT_ID::google-production-project"
+      #           echo "::set-env name=SECRET_KEY_NAME::GITHUB_PRODUCTION_SECRET"
+
+      # Setup gcloud CLI
+      - uses: google-github-actions/setup-gcloud@master
+        with:
+          # version: "290.0.1"
+          service_account_key: ${{ secrets.GCR_DEVOPS_SERVICE_ACCOUNT_KEY }}
+          project_id: ${{ secrets.PROJECT_ID }}
+
+      # Configure Docker to use the gcloud command-line tool as a credential
+      # helper for authentication
+      - name: Configure Docker
+        run: |-
+          gcloud --quiet auth configure-docker
+
+      - name: Build Docker Image
+        run: |-
+          docker build --tag $IMAGE_NAME .
+
+      # Push the Docker image to Google Container Registry
+      - name: Push Docker Image to GCR
+        run: |-
+          docker push $IMAGE_NAME
+
+      - name: Deploy to GCE
+        run: |-
+          gcloud compute instances update-container "$GCE_INSTANCE" \
+            --zone "$GCE_INSTANCE_ZONE" \
+            --container-image "$IMAGE_NAME:latest"
